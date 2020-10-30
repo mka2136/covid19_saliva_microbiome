@@ -1,0 +1,305 @@
+---
+title: "Saliva Microbiome in COVID-19 patients - Final Tables & Figures"
+author: "Medini Annavajhala"
+date: "10/30/2020"
+output: 
+  html_document: 
+    df_print: kable
+    fig_height: 8
+    fig_width: 8
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.path='./figures', fig.height = 8, fig.width = 8, 
+                      dev=c('png','tiff'), echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r import-libraries}
+library("phyloseq", warn.conflicts = FALSE)
+library("dplyr", warn.conflicts = FALSE)
+library("data.table", warn.conflicts = FALSE)
+library("cowplot", warn.conflicts = FALSE)
+library("ggplot2", warn.conflicts = FALSE)
+library("ggpubr", warn.conflicts = FALSE)
+library("ggrepel", warn.conflicts = FALSE)
+library("tableone", warn.conflicts = FALSE)
+library("readxl", warn.conflicts = FALSE)
+library("vegan", warn.conflicts = FALSE)
+library("stringr", warn.conflicts = FALSE)
+library("forcats", warn.conflicts = FALSE)
+library("plyr", warn.conflicts = FALSE)
+```
+
+```{r import-phylo}
+
+ps <- readRDS("./phylo.RDS")
+ps_relabun <- readRDS("./phylo_relabun.RDS")
+
+metadata = read_excel("metadata.xlsx", sheet="metadata")
+sd <- sample_data(metadata)
+sample_names(sd) <- metadata$StudyID
+ps2 <- merge_phyloseq(ps, sd)
+# ps2
+
+ps_relabun2 <- merge_phyloseq(ps_relabun, sd)
+# ps_relabun2
+
+saveRDS(ps,"./phylo_metadata.RDS")
+saveRDS(ps_relabun,"./phylo_relabun_metadata.RDS")
+
+```
+***
+## Table 1
+
+```{r table1}
+
+column_info = read_excel("metadata.xlsx", sheet="coldata")
+column_info = data.frame(column_info, stringsAsFactors = F)
+# head(column_info)
+
+factors = column_info[which(column_info$factor==1),]$variable
+numeric = column_info[which(column_info$numeric==1),]$variable
+
+metadata[factors] <- lapply(metadata[factors], factor)
+metadata[numeric] <- lapply(metadata[numeric], "as.character")
+metadata[numeric] <- lapply(metadata[numeric], "as.numeric")
+
+myVars <- c("age_first_covid", "sex_at_birth", "Race", "ethnicity", "BMI_Final", "dx_htn", 
+"dx_dm", "dx_ckd", "dx_kidney", "dx_any_pulm", "dx_any_liver", 
+"dx_cad", "Charlson_Comorbidity_Index", "Abx_48hrs_saliva_collection",
+"oxygen_rank_severity")
+
+catVars <- c("sex_at_birth", "Race","ethnicity", 
+"dx_htn", "dx_dm", "dx_ckd", "dx_kidney", "dx_any_pulm", "dx_any_liver", 
+"dx_cad", "Abx_48hrs_saliva_collection","oxygen_rank_severity")
+
+fishers_vars = c("dx_any_liver", "oxygen_rank_severity") #use fisher's exact test as indicated using SAS
+
+metadata$covid_status_per_lab = factor(metadata$covid_status_per_lab)
+
+```
+
+
+```{r table1-summary, echo=F, results="hide"}
+
+tab1 <- CreateTableOne(vars = myVars, data = metadata, factorVars = catVars, strata = "covid_status_per_lab")
+summary(tab1)
+
+```
+
+```{r table1-casescontrols}
+notNorm <- c("BMI_Final", "Charlson_Comorbidity_Index")
+
+table1 = data.frame(print(tab1, exact = fishers_vars, nonnormal=notNorm, smd = F, quote = TRUE, noSpaces = TRUE, printToggle = FALSE))
+colnames(table1) <- c("Controls","Cases","p","test")
+table1
+```
+
+***
+## Table 2
+
+```{r table2}
+
+myVars2 <- c("age_first_covid", "sex_at_birth", "Race", "ethnicity", "BMI_Final", "dx_htn", 
+"dx_dm", "dx_kidney", "dx_any_pulm", 
+"Charlson_Comorbidity_Index",
+"oxygen_rank_severity", "il6an_first", "esr_first", "crp_first", 
+"ferritin_first", "ddimer_first", "wbc_first", "nlr_first", 
+"Sx_Duration_cat2", "Abx_48hrs_saliva_collection", 
+"Composite_outcome")
+
+catVars2 <- c("sex_at_birth", "ethnicity", "dx_htn", 
+"dx_dm", "dx_kidney", "dx_any_pulm", 
+"oxygen_rank_severity", "Race", 
+"Sx_Duration_cat2","Abx_48hrs_saliva_collection", 
+"Composite_outcome")
+
+notNorm2 <- c("BMI_Final", "Charlson_Comorbidity_Index","il6an_first", "esr_first", "crp_first", "ferritin_first", "ddimer_first", "wbc_first","nlr_first")
+
+metadata$Saliva_Ct_HL = factor(metadata$Saliva_Ct_HL, levels=c("Neg","HighCt","LowCt"))
+
+m2 = metadata[metadata$covid_status_per_lab==1&!is.na(metadata$Saliva_Ct_HL),]
+ps_cases = prune_samples(sample_data(ps2)$covid_status_per_lab==1,ps2)
+m2 = m2[m2$StudyID %in% sample_names(ps_cases),]
+```
+
+
+```{r table2-summary, echo=F, results="hide"}
+
+tab2 <- CreateTableOne(vars = myVars2, data = m2, 
+                       factorVars = catVars2, strata = "Saliva_Ct_HL")
+
+fishers_vars2 = c("dx_any_liver", "oxygen_rank_severity","Sx_Duration_cat2", "Composite_outcome")
+print(summary(tab2))
+
+```
+
+```{r table2-viralload}
+table2=data.frame(print(tab2, nonnormal = notNorm2, exact=fishers_vars2, smd = F, quote = TRUE, noSpaces = TRUE, printToggle = FALSE))
+colnames(table2) <- c("Negative","High Ct","Low Ct","p","test")
+table2
+```
+***
+## Figure 1: Cases vs Controls - Microbiome Diversity 
+
+```{r fig1, warning=F, message=F}
+set.seed(2)
+alphadt1 = read.table("./alpha_diversity_values.txt", header=T)
+alphadt = merge(metadata, alphadt1, by="StudyID")
+
+alphadt$covid_status_per_lab = factor(alphadt$covid_status_per_lab)
+
+alphadt_shan = alphadt[alphadt$variable=="Shannon",]
+palpha_shan = ggplot(alphadt_shan, 
+       aes(x=covid_status_per_lab, y=value, color=covid_status_per_lab, fill=covid_status_per_lab)) + 
+  # facet_wrap(~variable, scales = "free") +
+  guides(color=guide_legend(title="COVID-19\nStatus"), fill=guide_legend(title="COVID-19\nStatus")) +
+  geom_jitter(width=0.15) +
+  geom_boxplot(outlier.shape = NA, alpha=0.15) +
+  stat_compare_means(label.y.npc = 0.1) +
+  xlab("") +
+  ylab("Shannon Alpha-Diversity") +
+  scale_color_manual(values=c("#ddaa33","#882255")) +
+  scale_fill_manual(values=c("#ddaa33","#882255")) +
+  theme_cowplot() +
+  theme(strip.background = element_blank()) 
+
+sample_data(ps_relabun2)$covid_status_per_lab = factor(sample_data(ps_relabun2)$covid_status_per_lab)
+
+ordu = ordinate(ps_relabun2, "PCoA", "unifrac", weighted=FALSE)
+pbeta = plot_ordination(ps_relabun2, ordu, color="covid_status_per_lab", shape="covid_status_per_lab") + 
+  geom_point(size=2.5) +
+  stat_ellipse() +
+  scale_color_manual(values=c("#ddaa33","#882255")) +
+  guides(color=guide_legend(title="COVID-19\nStatus"), shape=guide_legend(title="COVID-19\nStatus")) +
+  annotate(geom="text", label="PERMANOVA\nP=0.112", x=0.45, y=-0.3) +
+  theme_cowplot()
+
+fig1 = plot_grid(
+  palpha_shan, pbeta,
+  labels = "AUTO", label_size = 16, ncol = 1
+)
+
+fig1
+
+```
+
+***
+## Figure 2: Diversity in cases by viral load
+
+```{r fig2, fig.width=12, fig.height=6}
+
+alphadt_shan_cases = alphadt_shan[alphadt_shan$covid_status_per_lab==1,]
+alphadt_shan_cases$Saliva_Ct_HL3 = mapvalues(alphadt_shan_cases$Saliva_Ct_HL, from=c("Neg","HighCt","LowCt"), to=c("Negative","Low","High"))
+alphadt_shan_cases = alphadt_shan_cases[!is.na(alphadt_shan_cases$Saliva_Ct_HL3),]
+
+palpha_shan_cases = ggplot(alphadt_shan_cases, 
+       aes(x=Saliva_Ct_HL3, y=value, color=Saliva_Ct_HL3, fill=Saliva_Ct_HL3)) + 
+  # facet_wrap(~variable, scales = "free") +
+  # guides(color=guide_legend(title="Saliva\nViral Load"), fill=guide_legend(title="Saliva\nViral Load")) +
+  guides(color=F, fill=F) +
+  geom_jitter(width=0.15) +
+  geom_boxplot(outlier.shape = NA, alpha=0.15) +
+  stat_compare_means(label.y.npc = 0.1, size=5,
+                     comparisons = list(c("Negative","Low"),c("Negative","High"),c("Low","High"))) +
+  stat_compare_means(label.y.npc = 0.1, size=5) +
+  xlab("Saliva Viral Load") +
+  ylab("Shannon Alpha-Diversity") +
+  scale_color_manual(values=c("#d8bfd8","#9370db","#8b008b")) +
+  scale_fill_manual(values=c("#d8bfd8","#9370db","#8b008b")) +
+  theme_cowplot(font_size = 16) +
+  theme(strip.background = element_blank()) 
+
+# palpha_shan_cases
+
+
+ps_relabun_cases = prune_samples(sample_data(ps_relabun2)$covid_status_per_lab==1, ps_relabun2)
+ps_relabun_cases_cts = prune_samples(sample_data(ps_relabun_cases)$Saliva_Ct_HL!="NA", ps_relabun_cases)
+
+DistUF = phyloseq::distance(ps_relabun_cases_cts, "UniFrac")
+# adonis(DistUF ~ Saliva_Ct_HL, data=alphadt_shan_cases) #P=0.96
+
+ordu = ordinate(ps_relabun_cases_cts, "PCoA", distance = DistUF, weighted=FALSE)
+pbeta_cases = plot_ordination(ps_relabun_cases_cts, ordu, color="Saliva_Ct_HL", shape="Saliva_Ct_HL") + 
+  stat_ellipse() +
+  scale_color_manual(values=c("#d8bfd8","#9370db","#8b008b")) +
+  guides(color=guide_legend(title="Saliva Viral Load"), shape=guide_legend(title="Saliva Viral Load")) +
+  annotate(geom="text", label="PERMANOVA\nP=0.968", x=0.3, y=-0.45, size=5) +
+  theme_cowplot(font_size = 16) + theme(legend.position = "bottom")
+
+# pbeta_cases
+
+
+fig2 = plot_grid(
+  palpha_shan_cases, pbeta_cases,
+  labels = "AUTO", label_size = 16, ncol = 2
+)
+
+fig2
+
+```
+
+***
+## Figure 3: Differential abundance of ASVs in SARS-CoV-2-positive and -negative saliva in patients with SARS-CoV-2-positive nasopharyngeal swabs 
+
+These are all the significantly differentially enriched taxa (classified at species level) across viral load categories based on DESeq2, after adjusting for need for supplemental O2:
+
+```{r deseq2_results}
+
+sig_tax_all = read_excel("./DESeq2_combined.xlsx")
+# dim(sig_tax_all)
+sig_tax_all = sig_tax_all[!(sig_tax_all$Genus%in%c("NA","g__")),]
+
+sig_tax_all = mutate(sig_tax_all, dir = ifelse(log2FoldChange <0,"down","up"))
+
+sig_tax_all$Genus_Species = paste(sig_tax_all$Genus, sig_tax_all$Species,sep=" ") 
+sig_tax_all$Genus_Species = str_replace(sig_tax_all$Genus_Species, "g__","") 
+sig_tax_all$Genus_Species = str_replace(sig_tax_all$Genus_Species, "s__","") 
+sig_tax_all$Genus_Species = str_replace(sig_tax_all$Genus_Species, " NA","") 
+sig_tax_all$Genus_Species = str_replace(sig_tax_all$Genus_Species, " NA","") 
+sig_tax_all$Genus_Species = str_replace(sig_tax_all$Genus_Species, " NA","") 
+sig_tax_all$Genus_Species = str_replace_all(sig_tax_all$Genus_Species, "_"," ") 
+unique(sig_tax_all$Genus_Species)
+```
+
+Now we plot each significantly enriched ASV based on log2-fold change and baseMean
+
+```{r fig3, fig.width=18.5, fig.height=8.5, dpi=300}
+
+lims <- max(abs(sig_tax_all$log2FoldChange) + abs(sig_tax_all$lfcSE))*1.0
+
+sig_tax_all$Comparison = factor(sig_tax_all$Comparison, levels=c("Positive vs. Negative qRT-PCR", "Low Viral Load vs. Negative","High Viral Load vs. Negative","High vs. Low Viral Load"))
+
+sig_tax_all$Comparison = mapvalues(sig_tax_all$Comparison, from = c("Positive vs. Negative qRT-PCR", "Low Viral Load vs. Negative",
+                                           "High Viral Load vs. Negative","High vs. Low Viral Load"), 
+          to = c("Negative vs. Positive qRT-PCR", "Negative vs. Low Viral Load","Negative vs. High Viral Load","Low vs. High Viral Load"))
+
+dircolors2 = c("#0072b2","#cc79a7")
+
+fig3 = sig_tax_all[sig_tax_all$Comparison!="Low vs. High Viral Load",] %>%
+  mutate(Genus_Species = fct_reorder(Genus_Species, log2FoldChange, .fun='max')) %>%
+  ggplot(aes(x=Genus_Species, y=log2FoldChange, color=dir, shape=shape)) + 
+      facet_wrap(~Comparison, ncol=4) +  geom_hline(yintercept=0) + coord_flip() + 
+      geom_errorbar(aes(x=Genus_Species, ymin=log2FoldChange-lfcSE, max=log2FoldChange+lfcSE), width=0.5, size=1)  + 
+      geom_point(aes(size=baseMean), alpha=0.75) +
+      theme_bw() + 
+  # theme_cowplot() +
+  scale_color_manual(values=dircolors2) +
+  scale_shape_manual(values=c(1,19)) +
+  guides(color=F, size=guide_legend("Normalized\nBaseline\nMean"), shape=F) +
+  ylim(c(-lims, lims)) +
+  theme(strip.background = element_blank(),
+        strip.text=element_text(size=18),
+        axis.text.y=element_text(face="italic", size=16),
+        axis.text.x=element_text(size=16),
+        axis.title.x=element_text(size=18),
+        legend.title = element_text(size=18),
+        legend.text=element_text(size=14)) +
+  xlab("") +
+  ylab("\nLog2-Fold Change")
+
+fig3
+
+```
+
