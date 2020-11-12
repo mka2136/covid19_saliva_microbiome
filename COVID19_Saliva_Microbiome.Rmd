@@ -206,8 +206,8 @@ palpha_shan_cases = ggplot(alphadt_shan_cases,
   stat_compare_means(label.y.npc = 0.1, size=5) +
   xlab("Saliva Viral Load") +
   ylab("Shannon Alpha-Diversity") +
-  scale_color_manual(values=c("#d8bfd8","#9370db","#8b008b")) +
-  scale_fill_manual(values=c("#d8bfd8","#9370db","#8b008b")) +
+  scale_color_manual(values=c("#c799c7","#9370db","#8b008b")) +
+  scale_fill_manual(values=c("#c799c7","#9370db","#8b008b")) +
   theme_cowplot(font_size = 16) +
   theme(strip.background = element_blank()) 
 
@@ -223,7 +223,7 @@ DistUF = phyloseq::distance(ps_relabun_cases_cts, "UniFrac")
 ordu = ordinate(ps_relabun_cases_cts, "PCoA", distance = DistUF, weighted=FALSE)
 pbeta_cases = plot_ordination(ps_relabun_cases_cts, ordu, color="Saliva_Ct_HL", shape="Saliva_Ct_HL") + 
   stat_ellipse() +
-  scale_color_manual(values=c("#d8bfd8","#9370db","#8b008b")) +
+  scale_color_manual(values=c("#c799c7","#9370db","#8b008b")) +
   guides(color=guide_legend(title="Saliva Viral Load"), shape=guide_legend(title="Saliva Viral Load")) +
   annotate(geom="text", label="PERMANOVA\nP=0.968", x=0.3, y=-0.45, size=5) +
   theme_cowplot(font_size = 16) + theme(legend.position = "bottom")
@@ -301,5 +301,11 @@ fig3 = sig_tax_all[sig_tax_all$Comparison!="Low vs. High Viral Load",] %>%
 
 fig3
 
+```
+
+### Session Info
+
+```{r sessioninfo}
+sessionInfo()
 ```
 
